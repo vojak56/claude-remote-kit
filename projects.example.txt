@@ -1,0 +1,7 @@
+# Folders that stay reachable from the Claude app: one tab in the "remote" window per line.
+# Copy this file to projects.txt and edit it.
+# Format:  name | folder     (the name is what you see in the app; lines starting with # are ignored)
+# Changes apply the next time start-remote.ps1 runs (at login, or run it by hand).
+#
+# notes   | %USERPROFILE%\Documents\notes
+# website | C:\code\website

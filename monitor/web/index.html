@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#000000">
+<title>Claude monitor</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="xterm.min.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #screen { position: fixed; inset: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); padding: 6px; }
+  #link { position: fixed; right: 10px; bottom: 6px; font: 11px system-ui; color: #6b7280; pointer-events: none; }
+  #link.down { color: #bf616a; }
+  .xterm-viewport { overflow: hidden !important; }
+  #bell { position: fixed; right: 10px; top: calc(env(safe-area-inset-top) + 6px); z-index: 5;
+    font: 600 12px system-ui; color: #000; background: #e6e141; border: 0; border-radius: 6px; padding: 5px 10px;
+    cursor: pointer; opacity: .92; }
+  #bell.on { background: #1c2a1c; color: #a3be8c; }
+  #bell[hidden], #hint[hidden], #menu[hidden] { display: none; }
+  #hint, #menu { position: fixed; left: 12px; right: 12px; top: calc(env(safe-area-inset-top) + 40px); z-index: 5;
+    font: 13px/1.4 system-ui; color: #d8dee9; background: #111; border: 1px solid #262b33; border-radius: 8px; padding: 10px 12px;
+    max-width: 420px; margin-left: auto; }
+  #menu button { font: 600 13px system-ui; border: 0; border-radius: 6px; padding: 7px 12px; margin: 8px 8px 0 0; cursor: pointer; }
+  #menu .yes { background: #e6e141; color: #000; } #menu .no { background: #262b33; color: #d8dee9; }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<div id="link">connecting…</div>
+<button id="bell" hidden>🔔 Notifications</button>
+<div id="hint" hidden></div>
+<div id="menu" hidden>Notifications are on for this device.<br>
+  <button class="yes" id="test">Test</button><button class="no" id="off">Turn off</button><button class="no" id="close">Close</button></div>
+<script src="xterm.min.js"></script>
+<script src="addon-fit.min.js"></script>
+<script>
+  // The same screen as the terminal monitor: the server draws each frame for this window size and streams it.
+  const narrow = Math.min(innerWidth, innerHeight) < 600;
+  const term = new Terminal({
+    convertEol: true, disableStdin: true, cursorBlink: false, scrollback: 0,
+    fontFamily: '"JetBrains Mono", "Cascadia Mono", Consolas, Menlo, monospace',
+    fontSize: narrow ? 10 : 13, lineHeight: 1.05,
+    theme: { background: '#000000', foreground: '#d8dee9' },
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('screen'));
+  const link = document.getElementById('link');
+  let source = null, size = '';
+
+  function connect() {
+    fit.fit();
+    const next = `${term.cols}x${term.rows}`;
+    if (next === size && source) return;
+    size = next;
+    if (source) source.close();
+    source = new EventSource(`stream?cols=${term.cols}&rows=${term.rows}`);
+    source.onmessage = e => { term.write(JSON.parse(e.data)); link.textContent = ''; link.className = ''; };
+    source.onerror = () => { link.textContent = 'lost connection to the computer — reconnecting…'; link.className = 'down'; };
+  }
+  let wait;
+  addEventListener('resize', () => { clearTimeout(wait); wait = setTimeout(connect, 200); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { size = ''; connect(); } });
+
+  // "Your turn" bell: subscribes this device to push. On iPhone this works only from the Home Screen app.
+  // No confirm/alert dialogs: own little panels instead.
+  const bell = document.getElementById('bell'), hint = document.getElementById('hint');
+  const menu = document.getElementById('menu');
+  const iOS = /iPhone|iPad/.test(navigator.userAgent);
+  const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  const toBytes = s => Uint8Array.from(atob((s + '='.repeat((4 - s.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+  const post = (path, body) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+  function say(text, sec = 7) {
+    menu.hidden = true; hint.textContent = text; hint.hidden = false;
+    clearTimeout(say.t); say.t = setTimeout(() => hint.hidden = true, sec * 1000);
+  }
+
+  async function setupBell() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      if (iOS && !installed) {
+        bell.hidden = false; bell.textContent = '🔔 How to enable';
+        bell.onclick = () => say('On iPhone, notifications work only from the installed app: Share → "Add to Home Screen", then open the "Claude monitor" icon and tap 🔔.', 14);
+      }
+      return;
+    }
+    const reg = await navigator.serviceWorker.register('sw.js');
+    const sub = await reg.pushManager.getSubscription();
+    bell.hidden = false;
+    if (sub) {
+      bell.textContent = '🔔 on'; bell.className = 'on';
+      bell.onclick = () => { hint.hidden = true; menu.hidden = !menu.hidden; };
+      document.getElementById('test').onclick = async () => {
+        const r = await post('test', {});
+        say(r.delivered ? 'Sent a test notification.' : 'It did not arrive — turn notifications off and on again.');
+      };
+      document.getElementById('off').onclick = async () => {
+        await post('unsubscribe', { endpoint: sub.endpoint }); await sub.unsubscribe();
+        menu.hidden = true; setupBell();
+      };
+      document.getElementById('close').onclick = () => menu.hidden = true;
+    } else {
+      bell.textContent = '🔔 Notifications'; bell.className = '';
+      bell.onclick = async () => {
+        try {
+          if (await Notification.requestPermission() !== 'granted') return say('Notifications are blocked for this site in the browser settings.');
+          const { key } = await (await fetch('vapid')).json();
+          const created = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: toBytes(key) });
+          const device = iOS ? 'iPhone' : (/Mac/.test(navigator.userAgent) ? 'Mac' : navigator.platform);
+          await post('subscribe', { subscription: created.toJSON(), device });
+          await post('test', {});
+          say("Done: you'll get a notification when a session finishes and waits for you, or asks a question.");
+          setupBell();
+        } catch (e) { say('Could not enable notifications: ' + e.message, 12); }
+      };
+    }
+  }
+  setupBell();
+
+  term.write('\x1b[?25l');
+  connect();
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+# your settings and runtime state (WezTerm sockets, push keys and subscriptions, logs)
+config.json
+projects.txt
+state/
+__pycache__/
+*.pyc

@@ -1,0 +1,17 @@
+{
+  "_comment": "Copy to config.json and change what you need. Every key is optional; the values here are the defaults. Command names are looked up on PATH; you can also give full paths. Relative paths are relative to the kit folder.",
+  "claude": "claude",
+  "wezterm": "wezterm",
+  "wezterm_config": "",
+  "python": "python",
+  "state_dir": "state",
+  "projects_file": "projects.txt",
+  "monitor": {
+    "web_port": 8790,
+    "allowed_users": [],
+    "push_contact": "",
+    "services": [],
+    "your_turn_minutes": 60,
+    "context_tokens": 1000000
+  }
+}
